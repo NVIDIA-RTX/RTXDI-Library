@@ -1,21 +1,23 @@
-/***************************************************************************
- # Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
- #
- # NVIDIA CORPORATION and its licensors retain all intellectual property
- # and proprietary rights in and to this software, related documentation
- # and any modifications thereto.  Any use, reproduction, disclosure or
- # distribution of this software and related documentation without an express
- # license agreement from NVIDIA CORPORATION is strictly prohibited.
- **************************************************************************/
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+ *
+ * NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+ * property and proprietary rights in and to this material, related
+ * documentation and any modifications thereto. Any use, reproduction,
+ * disclosure or distribution of this material and related documentation
+ * without an express license agreement from NVIDIA CORPORATION or
+ * its affiliates is strictly prohibited.
+ */
 
 #include "Rtxdi/GI/ReSTIRGI.h"
 
 namespace rtxdi
 {
 
-ReSTIRGI_BufferIndices GetDefaultReSTIRGIBufferIndices()
+RTXDI_GIBufferIndices GetDefaultReSTIRGIBufferIndices()
 {
-    ReSTIRGI_BufferIndices bufferIndices = {};
+    RTXDI_GIBufferIndices bufferIndices = {};
     bufferIndices.secondarySurfaceReSTIRDIOutputBufferIndex = 0;
     bufferIndices.temporalResamplingInputBufferIndex = 0;
     bufferIndices.temporalResamplingOutputBufferIndex = 0;
@@ -24,35 +26,56 @@ ReSTIRGI_BufferIndices GetDefaultReSTIRGIBufferIndices()
     return bufferIndices;
 }
 
-ReSTIRGI_TemporalResamplingParameters GetDefaultReSTIRGITemporalResamplingParams()
+RTXDI_GITemporalResamplingParameters GetDefaultReSTIRGITemporalResamplingParams()
 {
-    ReSTIRGI_TemporalResamplingParameters params = {};
-    params.boilingFilterStrength = 0.2f;
+    RTXDI_GITemporalResamplingParameters params = {};
     params.depthThreshold = 0.1f;
-    params.enableBoilingFilter = true;
     params.enableFallbackSampling = true;
     params.enablePermutationSampling = false;
     params.maxHistoryLength = 8;
     params.maxReservoirAge = 30;
     params.normalThreshold = 0.6f;
-    params.temporalBiasCorrectionMode = ResTIRGI_TemporalBiasCorrectionMode::Basic;
+    params.biasCorrectionMode = RTXDI_GIBiasCorrectionMode::Basic;
     return params;
 }
 
-ReSTIRGI_SpatialResamplingParameters GetDefaultReSTIRGISpatialResamplingParams()
+RTXDI_BoilingFilterParameters GetDefaultReSTIRGIBoilingFilterParams()
 {
-    ReSTIRGI_SpatialResamplingParameters params = {};
-    params.numSpatialSamples = 2;
-    params.spatialBiasCorrectionMode = ResTIRGI_SpatialBiasCorrectionMode::Basic;
-    params.spatialDepthThreshold = 0.1f;
-    params.spatialNormalThreshold = 0.6f;
-    params.spatialSamplingRadius = 32.0f;
+    RTXDI_BoilingFilterParameters params = {};
+    params.enableBoilingFilter = static_cast<uint32_t>(true);
+    params.boilingFilterStrength = 0.2f;
     return params;
 }
 
-ReSTIRGI_FinalShadingParameters GetDefaultReSTIRGIFinalShadingParams()
+RTXDI_GISpatialResamplingParameters GetDefaultReSTIRGISpatialResamplingParams()
 {
-    ReSTIRGI_FinalShadingParameters params = {};
+    RTXDI_GISpatialResamplingParameters params = {};
+    params.numSamples = 2;
+    params.biasCorrectionMode = RTXDI_GIBiasCorrectionMode::Basic;
+    params.depthThreshold = 0.1f;
+    params.normalThreshold = 0.6f;
+    params.samplingRadius = 32.0f;
+    return params;
+}
+
+RTXDI_GISpatioTemporalResamplingParameters GetDefaultReSTIRGISpatioTemporalResamplingParams()
+{
+    RTXDI_GISpatioTemporalResamplingParameters params = {};
+    params.depthThreshold = 0.1f;
+    params.normalThreshold = 0.6f;
+    params.enableFallbackSampling = true;
+    params.enablePermutationSampling = false;
+    params.maxHistoryLength = 8;
+    params.maxReservoirAge = 30;
+    params.numSamples = 2;
+    params.biasCorrectionMode = RTXDI_GIBiasCorrectionMode::Basic;
+    params.samplingRadius = 32.0f;
+    return params;
+}
+
+RTXDI_GIFinalShadingParameters GetDefaultReSTIRGIFinalShadingParams()
+{
+    RTXDI_GIFinalShadingParameters params = {};
     params.enableFinalMIS = true;
     params.enableFinalVisibility = true;
     return params;
@@ -65,7 +88,9 @@ ReSTIRGIContext::ReSTIRGIContext(const ReSTIRGIStaticParameters& staticParams) :
     m_resamplingMode(rtxdi::ReSTIRGI_ResamplingMode::None),
     m_bufferIndices(GetDefaultReSTIRGIBufferIndices()),
     m_temporalResamplingParams(GetDefaultReSTIRGITemporalResamplingParams()),
+    m_boilingFilterParams(GetDefaultReSTIRGIBoilingFilterParams()),
     m_spatialResamplingParams(GetDefaultReSTIRGISpatialResamplingParams()),
+    m_spatioTemporalResamplingParams(GetDefaultReSTIRGISpatioTemporalResamplingParams()),
     m_finalShadingParams(GetDefaultReSTIRGIFinalShadingParams())
 {
 }
@@ -90,22 +115,32 @@ ReSTIRGI_ResamplingMode ReSTIRGIContext::GetResamplingMode() const
     return m_resamplingMode;
 }
 
-ReSTIRGI_BufferIndices ReSTIRGIContext::GetBufferIndices() const
+RTXDI_GIBufferIndices ReSTIRGIContext::GetBufferIndices() const
 {
     return m_bufferIndices;
 }
 
-ReSTIRGI_TemporalResamplingParameters ReSTIRGIContext::GetTemporalResamplingParameters() const
+RTXDI_GITemporalResamplingParameters ReSTIRGIContext::GetTemporalResamplingParameters() const
 {
     return m_temporalResamplingParams;
 }
 
-ReSTIRGI_SpatialResamplingParameters ReSTIRGIContext::GetSpatialResamplingParameters() const
+RTXDI_BoilingFilterParameters ReSTIRGIContext::GetBoilingFilterParameters() const
+{
+    return m_boilingFilterParams;
+}
+
+RTXDI_GISpatialResamplingParameters ReSTIRGIContext::GetSpatialResamplingParameters() const
 {
     return m_spatialResamplingParams;
 }
 
-ReSTIRGI_FinalShadingParameters ReSTIRGIContext::GetFinalShadingParameters() const
+RTXDI_GISpatioTemporalResamplingParameters ReSTIRGIContext::GetSpatioTemporalResamplingParameters() const
+{
+    return m_spatioTemporalResamplingParams;
+}
+
+RTXDI_GIFinalShadingParameters ReSTIRGIContext::GetFinalShadingParameters() const
 {
     return m_finalShadingParams;
 }
@@ -123,18 +158,28 @@ void ReSTIRGIContext::SetResamplingMode(ReSTIRGI_ResamplingMode resamplingMode)
     UpdateBufferIndices();
 }
 
-void ReSTIRGIContext::SetTemporalResamplingParameters(const ReSTIRGI_TemporalResamplingParameters& temporalResamplingParams)
+void ReSTIRGIContext::SetTemporalResamplingParameters(const RTXDI_GITemporalResamplingParameters& temporalResamplingParams)
 {
     m_temporalResamplingParams = temporalResamplingParams;
     m_temporalResamplingParams.uniformRandomNumber = JenkinsHash(m_frameIndex);
 }
 
-void ReSTIRGIContext::SetSpatialResamplingParameters(const ReSTIRGI_SpatialResamplingParameters& spatialResamplingParams)
+void ReSTIRGIContext::SetBoilingFilterParameters(const RTXDI_BoilingFilterParameters& boilingFilterParams)
+{
+    m_boilingFilterParams = boilingFilterParams;
+}
+
+void ReSTIRGIContext::SetSpatialResamplingParameters(const RTXDI_GISpatialResamplingParameters& spatialResamplingParams)
 {
     m_spatialResamplingParams = spatialResamplingParams;
 }
 
-void ReSTIRGIContext::SetFinalShadingParameters(const ReSTIRGI_FinalShadingParameters& finalShadingParams)
+void ReSTIRGIContext::SetSpatioTemporalResamplingParameters(const RTXDI_GISpatioTemporalResamplingParameters& spatioTemporalParams)
+{
+    m_spatioTemporalResamplingParams = spatioTemporalParams;
+}
+
+void ReSTIRGIContext::SetFinalShadingParameters(const RTXDI_GIFinalShadingParameters& finalShadingParams)
 {
     m_finalShadingParams = finalShadingParams;
 }

@@ -1,12 +1,14 @@
-/***************************************************************************
- # Copyright (c) 2020-2023, NVIDIA CORPORATION.  All rights reserved.
- #
- # NVIDIA CORPORATION and its licensors retain all intellectual property
- # and proprietary rights in and to this software, related documentation
- # and any modifications thereto.  Any use, reproduction, disclosure or
- # distribution of this software and related documentation without an express
- # license agreement from NVIDIA CORPORATION is strictly prohibited.
- **************************************************************************/
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2020-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: LicenseRef-NvidiaProprietary
+ *
+ * NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
+ * property and proprietary rights in and to this material, related
+ * documentation and any modifications thereto. Any use, reproduction,
+ * disclosure or distribution of this material and related documentation
+ * without an express license agreement from NVIDIA CORPORATION or
+ * its affiliates is strictly prohibited.
+ */
 
 #include "Rtxdi/ImportanceSamplingContext.h"
 
@@ -15,6 +17,7 @@
 #include "Rtxdi/DI/ReSTIRDI.h"
 #include "Rtxdi/GI/ReSTIRGI.h"
 #include "Rtxdi/LightSampling/RISBufferSegmentAllocator.h"
+#include "Rtxdi/PT/ReSTIRPT.h"
 #include "Rtxdi/ReGIR/ReGIR.h"
 
 namespace
@@ -66,6 +69,12 @@ ImportanceSamplingContext::ImportanceSamplingContext(const ImportanceSamplingCon
     restirGIStaticParams.RenderWidth = isParams.renderWidth;
     restirGIStaticParams.RenderHeight = isParams.renderHeight;
     m_restirGIContext = std::make_unique<rtxdi::ReSTIRGIContext>(restirGIStaticParams);
+
+    ReSTIRPTStaticParameters restirPTStaticParams;
+    restirPTStaticParams.CheckerboardSamplingMode = isParams.CheckerboardSamplingMode;
+    restirPTStaticParams.RenderWidth = isParams.renderWidth;
+    restirPTStaticParams.RenderHeight = isParams.renderHeight;
+    m_restirPTContext = std::make_unique<rtxdi::ReSTIRPTContext>(restirPTStaticParams);
 }
 
 ImportanceSamplingContext::~ImportanceSamplingContext()
@@ -103,6 +112,16 @@ const ReSTIRGIContext& ImportanceSamplingContext::GetReSTIRGIContext() const
     return *m_restirGIContext;
 }
 
+ReSTIRPTContext& ImportanceSamplingContext::GetReSTIRPTContext()
+{
+    return *m_restirPTContext;
+}
+
+const ReSTIRPTContext& ImportanceSamplingContext::GetReSTIRPTContext() const
+{
+    return *m_restirPTContext;
+}
+
 const RISBufferSegmentAllocator& ImportanceSamplingContext::GetRISBufferSegmentAllocator() const
 {
     return *m_risBufferSegmentAllocator;
@@ -130,7 +149,7 @@ uint32_t ImportanceSamplingContext::GetNeighborOffsetCount() const
 
 bool ImportanceSamplingContext::IsLocalLightPowerRISEnabled() const
 {
-    ReSTIRDI_InitialSamplingParameters iss = m_restirDIContext->GetInitialSamplingParameters();
+    RTXDI_DIInitialSamplingParameters iss = m_restirDIContext->GetInitialSamplingParameters();
     if (iss.localLightSamplingMode == ReSTIRDI_LocalLightSamplingMode::Power_RIS)
         return true;
     if (iss.localLightSamplingMode == ReSTIRDI_LocalLightSamplingMode::ReGIR_RIS)
