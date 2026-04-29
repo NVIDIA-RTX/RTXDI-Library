@@ -107,13 +107,13 @@ struct RTXDI_HybridShiftPathTracerContext
 
         if(ReconnectionMode == RTXDI_RESTIRPT_RECONNECTION_MODE_FIXED_THRESHOLD)
         {
-            ptState.SetIsLastVertexFar(ptState.TraceResult.committedRayT > DistanceThreshold && !ptState.brdfRaySample.properties.IsDelta());
+            ptState.SetIsLastVertexFar(RAB_RayPayloadGetCommittedHitT(ptState.TraceResult) > DistanceThreshold && !ptState.brdfRaySample.properties.IsDelta());
         }
         else if (ReconnectionMode == RTXDI_RESTIRPT_RECONNECTION_MODE_FOOTPRINT)
         {
             // compute the V_prev->V ray footprint, if it is above threshold, we mark last vertex as "far"
             // this is used when testing the current vertex is connectible
-            const float RayFootprint = RTXDI_CalculateRayFootprint(RAB_GetSurfaceNormal(ptState.intersectionSurface), RAB_GetSurfaceViewDir(ptState.intersectionSurface), ptState.TraceResult.committedRayT, ptState.brdfRaySample);
+            const float RayFootprint = RTXDI_CalculateRayFootprint(RAB_GetSurfaceNormal(ptState.intersectionSurface), RAB_GetSurfaceViewDir(ptState.intersectionSurface), RAB_RayPayloadGetCommittedHitT(ptState.TraceResult), ptState.brdfRaySample);
             ptState.SetIsLastVertexFar(RayFootprint > FootprintThreshold);
         }
 
@@ -155,7 +155,7 @@ struct RTXDI_HybridShiftPathTracerContext
                     }
                     else if (ReconnectionMode == RTXDI_RESTIRPT_RECONNECTION_MODE_FOOTPRINT)
                     {
-                        CheckPreRcInverseGeoTerm = ptState.TraceResult.committedRayT * ptState.TraceResult.committedRayT / abs(dot(ptState.PreviousNormal, ptState.ContinuationRay.Direction));
+                        CheckPreRcInverseGeoTerm = RAB_RayPayloadGetCommittedHitT(ptState.TraceResult) * RAB_RayPayloadGetCommittedHitT(ptState.TraceResult) / abs(dot(ptState.PreviousNormal, ptState.ContinuationRay.Direction));
                     }
                 }
                 else // case 2. This is non-invertible
