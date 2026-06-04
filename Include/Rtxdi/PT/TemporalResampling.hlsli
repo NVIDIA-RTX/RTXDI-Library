@@ -204,16 +204,24 @@ bool ValidateTemporalNeighbor(const RTXDI_PTTemporalResamplingParameters tParams
                               const RAB_Surface PrevSurface,
                               inout int ReducedMaxTemporalHistory)
 {
+    // Reject no-Rc history paths (RcVertexLength > PathLength) before any mutations.
+    // These paths corrupt Surface via RAB_EmptySurface() in RandomReplay and produce
+    // a mismatched TargetFunction, causing biased WeightSum and BiasCorrection errors.
+    // Checking first avoids pointless Age/M writes on a structurally invalid sample.
+    if (PrevSample.RcVertexLength > PrevSample.PathLength)
+    {
+        return false;
+    }
+
     PrevSample.M = min(PrevSample.M, min(RTXDI_PTReservoir::MaxM, ReducedMaxTemporalHistory));
     ++PrevSample.Age;
 
-    bool FoundNeighbor = true;
     if (PrevSample.Age > min(RTXDI_PTRESERVOIR_AGE_MAX, tParams.maxReservoirAge))
     {
-        FoundNeighbor = false;
+        return false;
     }
 
-    return FoundNeighbor;
+    return true;
 }
 
 bool ShouldEvaluateTemporalReconnection(RTXDI_PTReservoir prevSample)

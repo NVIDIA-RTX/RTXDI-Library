@@ -167,6 +167,15 @@ bool ResampleNeighbors(const RTXDI_PTSpatialResamplingRuntimeParameters srrParam
         uint2 neighborReservoirPos = RTXDI_PixelPosToReservoirPos(neighborSurfacePos, RuntimeParams.activeCheckerboardField);
         RTXDI_PTReservoir NeighborReservoir = RTXDI_LoadPTReservoir(ReservoirBufferParams, neighborReservoirPos, BufferIndices.spatialResamplingInputBufferIndex);
 
+        // Reject no-Rc neighbor paths (RcVertexLength > PathLength).
+        // RandomReplay produces an incorrect TargetFunction for these paths, which can
+        // cause single-frame fireflies. CachedResult will not be set, so BiasCorrection
+        // automatically skips the same neighbors via the CachedResult mask.
+        if (NeighborReservoir.RcVertexLength > NeighborReservoir.PathLength)
+        {
+            continue;
+        }
+
 #if RTXDI_DEBUG == 1
         SpatialRetrace(srrParams, hspfParams, rParams, neighborSurface, NeighborReservoir, ptud);
 #endif
