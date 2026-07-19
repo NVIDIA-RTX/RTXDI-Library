@@ -14,7 +14,7 @@
 #define RAB_PT_RANDOM_CONTEXT_HLSLI
 
 #include "Rtxdi/RtxdiParameters.h"
-#include "Rtxdi/Utils/RandomSamplerstate.hlsli"
+#include "Rtxdi/Utils/RandomSamplerState.hlsli"
 
 struct RTXDI_PathTracerRandomContext
 {
