@@ -28,8 +28,7 @@ namespace rtxdi
         None,
         Temporal,
         Spatial,
-        TemporalAndSpatial,
-        FusedSpatiotemporal
+        TemporalAndSpatial
     };
 
     struct RISBufferSegmentParameters
@@ -54,7 +53,6 @@ namespace rtxdi
     RTXDI_DITemporalResamplingParameters GetDefaultReSTIRDITemporalResamplingParams();
     RTXDI_BoilingFilterParameters GetDefaultReSTIRDIBoilingFilterParams();
     RTXDI_DISpatialResamplingParameters GetDefaultReSTIRDISpatialResamplingParams();
-    RTXDI_DISpatioTemporalResamplingParameters GetDefaultReSTIRDISpatioTemporalResamplingParams();
     RTXDI_ShadingParameters GetDefaultReSTIRDIShadingParams();
 
     // Make this constructor take static RTXDI params, update its dynamic ones
@@ -71,7 +69,6 @@ namespace rtxdi
         RTXDI_DITemporalResamplingParameters GetTemporalResamplingParameters() const;
         RTXDI_BoilingFilterParameters GetBoilingFilterParameters() const;
         RTXDI_DISpatialResamplingParameters GetSpatialResamplingParameters() const;
-        RTXDI_DISpatioTemporalResamplingParameters GetSpatioTemporalResamplingParameters() const;
         RTXDI_ShadingParameters GetShadingParameters() const;
 
         uint32_t GetFrameIndex() const;
@@ -83,7 +80,6 @@ namespace rtxdi
         void SetTemporalResamplingParameters(const RTXDI_DITemporalResamplingParameters& temporalResamplingParams);
         void SetBoilingFilterParameters(const RTXDI_BoilingFilterParameters& boilingFilterParams);
         void SetSpatialResamplingParameters(const RTXDI_DISpatialResamplingParameters& spatialResamplingParams);
-        void SetSpatioTemporalResamplingParameters(const RTXDI_DISpatioTemporalResamplingParameters& spatioTemporalResamplingParams);
         void SetShadingParameters(const RTXDI_ShadingParameters& shadingParams);
 
     private:
@@ -101,7 +97,6 @@ namespace rtxdi
         RTXDI_DITemporalResamplingParameters m_temporalResamplingParams;
         RTXDI_BoilingFilterParameters m_boilingFilterParams;
         RTXDI_DISpatialResamplingParameters m_spatialResamplingParams;
-        RTXDI_DISpatioTemporalResamplingParameters m_spatioTemporalResamplingParams;
         RTXDI_ShadingParameters m_shadingParams;
 
         void UpdateBufferIndices();

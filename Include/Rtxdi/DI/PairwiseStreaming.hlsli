@@ -18,6 +18,11 @@
 // A helper used for pairwise MIS computations.  This might be able to simplify code elsewhere, too.
 float RTXDI_TargetPdfHelper(const RTXDI_DIReservoir lightReservoir, const RAB_Surface surface, bool prevFrame RTXDI_DEFAULT(false))
 {
+    if (!RTXDI_IsValidDIReservoir(lightReservoir))
+    {
+        return 0.0f;
+    }
+
     RAB_LightSample lightSample = RAB_SamplePolymorphicLight(
         RAB_LoadLightInfo(RTXDI_GetDIReservoirLightIndex(lightReservoir), prevFrame),
         surface, RTXDI_GetDIReservoirSampleUV(lightReservoir));

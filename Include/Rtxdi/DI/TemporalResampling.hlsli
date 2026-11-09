@@ -68,21 +68,36 @@ RTXDI_DIReservoir RTXDI_DITemporalResampling(
 
     RAB_Surface temporalSurface = RAB_EmptySurface();
     bool foundNeighbor = false;
+    bool usingFallback = false;
     const float radius = (rParams.activeCheckerboardField == 0) ? 4 : 8;
     int2 spatialOffset = int2(0, 0);
 
     // Try to find a matching surface in the neighborhood of the reprojected pixel
-    for(int i = 0; i < 9; i++)
+    const int temporalSampleCount = 9;
+    const int sampleCount = temporalSampleCount + (tparams.enableFallbackSampling ? 1 : 0);
+    for (int i = 0; i < sampleCount; i++)
     {
+        const bool isFirstSample = i == 0;
+        const bool isFallbackSample = i == temporalSampleCount;
         int2 offset = int2(0, 0);
-        if(i > 0)
+        if (isFallbackSample)
+        {
+            // Fallback sample: Sample from the same pixel position as the current pixel in previous frame,
+            //    and ignore any surface similarity tests. Very useful for disocclusions around screen edges
+            //    and often useful for disocclusions under motion, like "fps geometry" such as hands or guns.
+            //    Essentially a heuristic that bets that the freshly disoccluded geometry is lit by the same
+            //    light as whatever the previous frame had at the same pixel position.
+            prevPos = int2(pixelPosition);
+            usingFallback = true;
+        }
+        else if (!isFirstSample)
         {
             offset.x = int((RTXDI_GetNextRandom(rng) - 0.5) * radius);
             offset.y = int((RTXDI_GetNextRandom(rng) - 0.5) * radius);
         }
 
         int2 idx = prevPos + offset;
-        if (tparams.enablePermutationSampling && i == 0)
+        if ((tparams.enablePermutationSampling && isFirstSample) || isFallbackSample)
         {
             RTXDI_ApplyPermutationSampling(idx, tparams.uniformRandomNumber);
         }
@@ -95,7 +110,7 @@ RTXDI_DIReservoir RTXDI_DITemporalResampling(
             continue;
         
         // Test surface similarity, discard the sample if the surface is too different.
-        if (!RTXDI_IsValidNeighbor(
+        if (!isFallbackSample && !RTXDI_IsValidNeighbor(
             RAB_GetSurfaceNormal(surface), RAB_GetSurfaceNormal(temporalSurface), 
             expectedPrevLinearDepth, RAB_GetSurfaceLinearDepth(temporalSurface), 
             tparams.normalThreshold, tparams.depthThreshold))
@@ -109,6 +124,7 @@ RTXDI_DIReservoir RTXDI_DITemporalResampling(
     }
 
     bool selectedPreviousSample = false;
+    bool temporalSampleHasFreshVisibility = false;
     float prevM = 0;
 
     if (foundNeighbor)
@@ -118,16 +134,21 @@ RTXDI_DIReservoir RTXDI_DITemporalResampling(
         uint2 prevReservoirPos = RTXDI_PixelPosToReservoirPos(prevPos, rParams.activeCheckerboardField);
         RTXDI_DIReservoir prevSample = RTXDI_LoadDIReservoir(reservoirParams,
             prevReservoirPos, sourceBufferIndex);
+        // The visibility shortcut requires a test at this source pixel in the previous frame.
+        // Capture this before updating the history metadata, including fallback's age reset.
+        temporalSampleHasFreshVisibility = prevSample.age == 0 && all(prevSample.spatialDistance == 0);
         prevSample.M = min(prevSample.M, historyLimit);
-        prevSample.spatialDistance += spatialOffset;
-        prevSample.age += 1;
+        prevSample.spatialDistance = usingFallback ? int2(0, 0) : prevSample.spatialDistance + spatialOffset;
+        // Zero out age for fallback samples to invalidate visibility reuse, since by its nature the fallback sample
+        // does not test for surface similarity.
+        prevSample.age = usingFallback ? 0 : prevSample.age + 1;
 
         uint originalPrevLightID = RTXDI_GetDIReservoirLightIndex(prevSample);
 
         // Map the light ID from the previous frame into the current frame, if it still exists
         if (RTXDI_IsValidDIReservoir(prevSample))
         {
-            if (prevSample.age <= 1)
+            if (!usingFallback && prevSample.age <= 1)
             {
                 temporalSamplePixelPos = prevPos;
             }
@@ -190,7 +211,8 @@ RTXDI_DIReservoir RTXDI_DITemporalResampling(
             temporalP = RAB_GetLightSampleTargetPdfForSurface(selectedSampleAtTemporal, temporalSurface);
 
 #if RTXDI_ALLOWED_BIAS_CORRECTION >= RTXDI_BIAS_CORRECTION_RAY_TRACED
-            if (tparams.biasCorrectionMode == RTXDI_BIAS_CORRECTION_RAY_TRACED && temporalP > 0 && (!selectedPreviousSample || !tparams.enableVisibilityShortcut))
+            const bool useVisibilityShortcut = tparams.enableVisibilityShortcut && selectedPreviousSample && temporalSampleHasFreshVisibility;
+            if (tparams.biasCorrectionMode == RTXDI_BIAS_CORRECTION_RAY_TRACED && temporalP > 0 && !useVisibilityShortcut)
             {
                 if (!RAB_GetTemporalConservativeVisibility(surface, temporalSurface, selectedSampleAtTemporal))
                 {

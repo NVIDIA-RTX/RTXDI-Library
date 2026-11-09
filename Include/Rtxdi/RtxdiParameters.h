@@ -63,6 +63,10 @@
 // When neighboring samples have less than the naive sampling M threshold, they are ignored during spatial resampling
 #define RTXDI_NAIVE_SAMPLING_M_THRESHOLD 2
 
+// Neighbor offset buffer layouts used by ReSTIR DI spatial resampling.
+#define RTXDI_DI_NEIGHBOR_OFFSET_SAMPLING_MODE_LOW_DISCREPANCY 0
+#define RTXDI_DI_NEIGHBOR_OFFSET_SAMPLING_MODE_STRATIFIED_LOW_DISCREPANCY 1
+
 // This macro enables the functions that deal with the RIS buffer and presampling.
 #ifndef RTXDI_ENABLE_PRESAMPLING
 #define RTXDI_ENABLE_PRESAMPLING 1
@@ -107,7 +111,7 @@ struct RTXDI_RuntimeParameters
     uint32_t neighborOffsetMask; // Spatial
     uint32_t activeCheckerboardField; // 0 - no checkerboard, 1 - odd pixels, 2 - even pixels
     uint32_t frameIndex;
-    uint32_t pad2;
+    uint32_t pad1;
 };
 
 struct RTXDI_LightBufferParameters

@@ -13,10 +13,117 @@
 #include <Rtxdi/RtxdiUtils.h>
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 
 namespace rtxdi
 {
+
+namespace
+{
+
+constexpr uint32_t c_SpatialStratumCount = 4;
+constexpr float c_R2Phi = 1.0f / 1.3247179572447f;
+constexpr float c_HalfPi = 1.57079632679489661923f;
+constexpr float c_Snorm8Scale = 127.0f;
+
+bool IsNonzeroPowerOfTwo(uint32_t value)
+{
+    return value > 0 && (value & (value - 1)) == 0;
+}
+
+void FillLowDiscrepancyNeighborOffsetBuffer(uint8_t* buffer, uint32_t neighborOffsetCount)
+{
+    // Create a sequence of low-discrepancy samples within a unit radius around the origin
+    // for "randomly" sampling neighbors during spatial resampling.
+    const int radiusScale = 250;
+    uint32_t num = 0;
+    float u = 0.5f;
+    float v = 0.5f;
+    while (num < neighborOffsetCount * 2)
+    {
+        u += c_R2Phi;
+        v += c_R2Phi * c_R2Phi;
+        if (u >= 1.0f)
+        {
+            u -= 1.0f;
+        }
+        if (v >= 1.0f)
+        {
+            v -= 1.0f;
+        }
+
+        const float radiusSquared = (u - 0.5f) * (u - 0.5f) + (v - 0.5f) * (v - 0.5f);
+        if (radiusSquared > 0.25f)
+        {
+            continue;
+        }
+
+        const int quantizedU = int((u - 0.5f) * float(radiusScale));
+        const int quantizedV = int((v - 0.5f) * float(radiusScale));
+        buffer[num++] = static_cast<uint8_t>(quantizedU);
+        buffer[num++] = static_cast<uint8_t>(quantizedV);
+    }
+}
+
+float HashToUnitFloat(uint32_t value)
+{
+    constexpr uint32_t mantissaMask = (1u << 24) - 1u;
+    constexpr float mantissaScale = 1.0f / float(1u << 24);
+    return float(JenkinsHash(value) & mantissaMask) * mantissaScale;
+}
+
+void StoreSnorm8Offset(uint8_t* buffer, uint32_t offsetIndex, float x, float y)
+{
+    int quantizedX = std::max(-127, std::min(127, int(std::lround(x * c_Snorm8Scale))));
+    int quantizedY = std::max(-127, std::min(127, int(std::lround(y * c_Snorm8Scale))));
+
+    const int radiusSquared = quantizedX * quantizedX + quantizedY * quantizedY;
+    if (radiusSquared > int(c_Snorm8Scale * c_Snorm8Scale))
+    {
+        const float inwardScale = c_Snorm8Scale / std::sqrt(float(radiusSquared));
+        quantizedX = int(float(quantizedX) * inwardScale);
+        quantizedY = int(float(quantizedY) * inwardScale);
+    }
+
+    buffer[offsetIndex * 2] = static_cast<uint8_t>(static_cast<int8_t>(quantizedX));
+    buffer[offsetIndex * 2 + 1] = static_cast<uint8_t>(static_cast<int8_t>(quantizedY));
+}
+
+void FillStratifiedLowDiscrepancyNeighborOffsetBuffer(uint8_t* buffer, uint32_t neighborOffsetCount)
+{
+    const uint32_t groupCount = neighborOffsetCount / c_SpatialStratumCount;
+
+    // Each quadrant receives a distinct fixed phase-shifted R2 sequence. The square-to-quarter-disk
+    // transform is area preserving because the radius is the square root of a uniform value.
+    for (uint32_t quadrant = 0; quadrant < c_SpatialStratumCount; ++quadrant)
+    {
+        const uint32_t shiftSeed = 0x243f6a88u + quadrant * 2u;
+        float radiusSample = HashToUnitFloat(shiftSeed);
+        float angleSample = HashToUnitFloat(shiftSeed + 1u);
+
+        for (uint32_t group = 0; group < groupCount; ++group)
+        {
+            radiusSample += c_R2Phi;
+            angleSample += c_R2Phi * c_R2Phi;
+            if (radiusSample >= 1.0f)
+            {
+                radiusSample -= 1.0f;
+            }
+            if (angleSample >= 1.0f)
+            {
+                angleSample -= 1.0f;
+            }
+
+            const float radius = std::sqrt(radiusSample);
+            const float angle = (float(quadrant) + angleSample) * c_HalfPi;
+            const uint32_t offsetIndex = group * c_SpatialStratumCount + quadrant;
+            StoreSnorm8Offset(buffer, offsetIndex, radius * std::cos(angle), radius * std::sin(angle));
+        }
+    }
+}
+
+}
 
 RTXDI_ReservoirBufferParameters CalculateReservoirBufferParameters(uint32_t renderWidth, uint32_t renderHeight, CheckerboardMode checkerboardMode)
 {
@@ -45,28 +152,30 @@ void ComputePdfTextureSize(uint32_t maxItems, uint32_t& outWidth, uint32_t& outH
     outMipLevels = uint32_t(textureMips);
 }
 
-void FillNeighborOffsetBuffer(uint8_t* buffer, uint32_t neighborOffsetCount)
+void FillNeighborOffsetBuffer(
+    uint8_t* buffer,
+    uint32_t neighborOffsetCount)
 {
-    // Create a sequence of low-discrepancy samples within a unit radius around the origin
-    // for "randomly" sampling neighbors during spatial resampling
+    FillNeighborOffsetBuffer(buffer, neighborOffsetCount, ReSTIRDI_SpatialSamplingMode::LowDiscrepancy);
+}
 
-    int R = 250;
-    const float phi2 = 1.0f / 1.3247179572447f;
-    uint32_t num = 0;
-    float u = 0.5f;
-    float v = 0.5f;
-    while (num < neighborOffsetCount * 2) {
-        u += phi2;
-        v += phi2 * phi2;
-        if (u >= 1.0f) u -= 1.0f;
-        if (v >= 1.0f) v -= 1.0f;
+void FillNeighborOffsetBuffer(
+    uint8_t* buffer,
+    uint32_t neighborOffsetCount,
+    ReSTIRDI_SpatialSamplingMode samplingMode)
+{
+    assert(buffer != nullptr);
+    assert(IsNonzeroPowerOfTwo(neighborOffsetCount));
 
-        float rSq = (u - 0.5f) * (u - 0.5f) + (v - 0.5f) * (v - 0.5f);
-        if (rSq > 0.25f)
-            continue;
-
-        buffer[num++] = uint8_t((u - 0.5f) * float(R));
-        buffer[num++] = uint8_t((v - 0.5f) * float(R));
+    if (samplingMode == ReSTIRDI_SpatialSamplingMode::StratifiedLowDiscrepancy)
+    {
+        assert(neighborOffsetCount >= c_SpatialStratumCount);
+        FillStratifiedLowDiscrepancyNeighborOffsetBuffer(buffer, neighborOffsetCount);
+    }
+    else
+    {
+        assert(samplingMode == ReSTIRDI_SpatialSamplingMode::LowDiscrepancy);
+        FillLowDiscrepancyNeighborOffsetBuffer(buffer, neighborOffsetCount);
     }
 }
 

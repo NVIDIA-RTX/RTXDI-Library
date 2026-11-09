@@ -14,12 +14,17 @@
 #define RTXDI_DI_SPATIAL_RESAMPLING_HLSLI
 
 #include "Rtxdi/RtxdiParameters.h"
+#include "Rtxdi/Utils/Math.hlsli"
 #include "Rtxdi/DI/PairwiseStreaming.hlsli"
 #include <Rtxdi/DI/ReservoirStorage.hlsli>
 #include "Rtxdi/Utils/Checkerboard.hlsli"
+#include "Rtxdi/Utils/SpatialNeighborSampling.hlsli"
 
+#ifndef RTXDI_DI_NEIGHBOR_OFFSETS_BUFFER
 #ifndef RTXDI_NEIGHBOR_OFFSETS_BUFFER
-#error "RTXDI_NEIGHBOR_OFFSETS_BUFFER must be defined to point to a Buffer<float2> type resource"
+#error "RTXDI_DI_NEIGHBOR_OFFSETS_BUFFER or RTXDI_NEIGHBOR_OFFSETS_BUFFER must be defined to point to a Buffer<float2> type resource"
+#endif
+#define RTXDI_DI_NEIGHBOR_OFFSETS_BUFFER RTXDI_NEIGHBOR_OFFSETS_BUFFER
 #endif
 
 // This macro can be defined in the including shader file to reduce code bloat
@@ -29,9 +34,45 @@
 #define RTXDI_ALLOWED_BIAS_CORRECTION RTXDI_BIAS_CORRECTION_RAY_TRACED
 #endif
 
+// Screen-space pixel of a spatial neighbor, plus the offset used to reach it.
+int2 RTXDI_CalculateDISpatialNeighborIndex(
+    uint2 pixelPosition,
+    uint neighborSequence,
+    uint neighborIndex,
+    uint numSpatialSamples,
+    RTXDI_RuntimeParameters rParams,
+    ReSTIRDI_SpatialSamplingMode neighborOffsetSamplingMode,
+    float samplingRadius,
+    out int2 spatialOffset)
+{
+    spatialOffset = int2(0, 0);
+    uint sampleIdx = RTXDI_CalculateSpatialNeighborOffsetIndex(
+        neighborSequence, neighborIndex, numSpatialSamples, rParams, neighborOffsetSamplingMode);
+    spatialOffset = int2(float2(RTXDI_DI_NEIGHBOR_OFFSETS_BUFFER[sampleIdx].xy) * samplingRadius);
+    int2 idx = int2(pixelPosition) + spatialOffset;
+    idx = RAB_ClampSamplePositionIntoView(idx, false);
+    RTXDI_ActivateCheckerboardPixel(idx, false, rParams.activeCheckerboardField);
+    return idx;
+}
+
+int2 RTXDI_CalculateDISpatialNeighborIndex(
+    uint2 pixelPosition,
+    uint neighborSequence,
+    uint neighborIndex,
+    uint numSpatialSamples,
+    RTXDI_RuntimeParameters rParams,
+    ReSTIRDI_SpatialSamplingMode neighborOffsetSamplingMode,
+    float samplingRadius)
+{
+    int2 spatialOffset = int2(0, 0);
+    return RTXDI_CalculateDISpatialNeighborIndex(
+        pixelPosition, neighborSequence, neighborIndex, numSpatialSamples, rParams,
+        neighborOffsetSamplingMode, samplingRadius, spatialOffset);
+}
+
 // Spatial resampling pass, using pairwise MIS.  
 // Inputs and outputs equivalent to RTXDI_SpatialResampling(), but only uses pairwise MIS.
-// Can call this directly, or call RTXDI_SpatialResampling() with sparams.biasCorrectionMode 
+// Can call this directly, or call RTXDI_SpatialResampling() with sParams.biasCorrectionMode
 // set to RTXDI_BIAS_CORRECTION_PAIRWISE, which simply calls this function.
 RTXDI_DIReservoir RTXDI_DISpatialResamplingWithPairwiseMIS(
     uint2 pixelPosition,
@@ -41,7 +82,7 @@ RTXDI_DIReservoir RTXDI_DISpatialResamplingWithPairwiseMIS(
     RTXDI_RuntimeParameters rParams,
     RTXDI_ReservoirBufferParameters reservoirParams,
 	uint sourceBufferIndex,
-    RTXDI_DISpatialResamplingParameters sparams,
+    RTXDI_DISpatialResamplingParameters sParams,
     inout RAB_LightSample selectedLightSample)
 {
     // Initialize the output reservoir
@@ -49,23 +90,22 @@ RTXDI_DIReservoir RTXDI_DISpatialResamplingWithPairwiseMIS(
     state.canonicalWeight = 0.0f;
 
     // How many spatial samples to use?  
-    uint numSpatialSamples = (centerSample.M < sparams.targetHistoryLength)
-        ? max(sparams.numDisocclusionBoostSamples, sparams.numSamples)
-        : sparams.numSamples;
+    uint numSpatialSamples = (centerSample.M < sParams.targetHistoryLength)
+        ? max(sParams.numDisocclusionBoostSamples, sParams.numSamples)
+        : sParams.numSamples;
 
     // Walk the specified number of neighbors, resampling using RIS
-    uint startIdx = uint(RTXDI_GetNextRandom(rng) * rParams.neighborOffsetMask);
+    uint neighborSequence = RTXDI_InitializeSpatialNeighborSequence(
+        RTXDI_GetNextRandom(rng), rParams, sParams.neighborOffsetSamplingMode);
     uint validSpatialSamples = 0;
     uint i;
     for (i = 0; i < numSpatialSamples; ++i)
     {
         // Get screen-space location of neighbor
-        uint sampleIdx = (startIdx + i) & rParams.neighborOffsetMask;
-        int2 spatialOffset = int2(float2(RTXDI_NEIGHBOR_OFFSETS_BUFFER[sampleIdx].xy) * sparams.samplingRadius);
-        int2 idx = int2(pixelPosition)+spatialOffset;
-        idx = RAB_ClampSamplePositionIntoView(idx, false);
-
-        RTXDI_ActivateCheckerboardPixel(idx, false, rParams.activeCheckerboardField);
+        int2 spatialOffset = int2(0, 0);
+        int2 idx = RTXDI_CalculateDISpatialNeighborIndex(
+            pixelPosition, neighborSequence, i, numSpatialSamples, rParams,
+            sParams.neighborOffsetSamplingMode, sParams.samplingRadius, spatialOffset);
 
         RAB_Surface neighborSurface = RAB_GetGBufferSurface(idx, false);
 
@@ -75,10 +115,10 @@ RTXDI_DIReservoir RTXDI_DISpatialResamplingWithPairwiseMIS(
 
         if (!RTXDI_IsValidNeighbor(RAB_GetSurfaceNormal(centerSurface), RAB_GetSurfaceNormal(neighborSurface),
             RAB_GetSurfaceLinearDepth(centerSurface), RAB_GetSurfaceLinearDepth(neighborSurface),
-            sparams.normalThreshold, sparams.depthThreshold))
+            sParams.normalThreshold, sParams.depthThreshold))
             continue;
 
-        if (sparams.enableMaterialSimilarityTest && !RAB_AreMaterialsSimilar(RAB_GetMaterial(centerSurface), RAB_GetMaterial(neighborSurface)))
+        if (sParams.enableMaterialSimilarityTest && !RAB_AreMaterialsSimilar(RAB_GetMaterial(centerSurface), RAB_GetMaterial(neighborSurface)))
             continue;
 
         // The surfaces are similar enough so we *can* reuse a neighbor from this pixel, so load it.
@@ -88,7 +128,7 @@ RTXDI_DIReservoir RTXDI_DISpatialResamplingWithPairwiseMIS(
 
         if (RTXDI_IsValidDIReservoir(neighborSample))
         {
-            if (sparams.discountNaiveSamples && neighborSample.M <= RTXDI_NAIVE_SAMPLING_M_THRESHOLD)
+            if (sParams.discountNaiveSamples && neighborSample.M <= RTXDI_NAIVE_SAMPLING_M_THRESHOLD)
                 continue;
         }
 
@@ -137,13 +177,13 @@ RTXDI_DIReservoir RTXDI_DISpatialResampling(
     RTXDI_RuntimeParameters rParams,
     RTXDI_ReservoirBufferParameters reservoirParams,
     uint sourceBufferIndex,
-    RTXDI_DISpatialResamplingParameters sparams,
+    RTXDI_DISpatialResamplingParameters sParams,
     inout RAB_LightSample selectedLightSample)
 {
-    if (sparams.biasCorrectionMode == RTXDI_BIAS_CORRECTION_PAIRWISE)
+    if (sParams.biasCorrectionMode == RTXDI_BIAS_CORRECTION_PAIRWISE)
     {
         return RTXDI_DISpatialResamplingWithPairwiseMIS(pixelPosition, centerSurface, 
-            centerSample, rng, rParams, reservoirParams, sourceBufferIndex, sparams, selectedLightSample);
+            centerSample, rng, rParams, reservoirParams, sourceBufferIndex, sParams, selectedLightSample);
     }
 
     RTXDI_DIReservoir state = RTXDI_EmptyDIReservoir();
@@ -163,12 +203,13 @@ RTXDI_DIReservoir RTXDI_DISpatialResampling(
 
     RTXDI_CombineDIReservoirs(state, centerSample, /* random = */ 0.5f, centerSample.targetPdf);
 
-    uint startIdx = uint(RTXDI_GetNextRandom(rng) * rParams.neighborOffsetMask);
+    uint neighborSequence = RTXDI_InitializeSpatialNeighborSequence(
+        RTXDI_GetNextRandom(rng), rParams, sParams.neighborOffsetSamplingMode);
     
     uint i;
-    uint numSpatialSamples = sparams.numSamples;
-    if(centerSample.M < sparams.targetHistoryLength)
-        numSpatialSamples = max(sparams.numDisocclusionBoostSamples, numSpatialSamples);
+    uint numSpatialSamples = sParams.numSamples;
+    if(centerSample.M < sParams.targetHistoryLength)
+        numSpatialSamples = max(sParams.numDisocclusionBoostSamples, numSpatialSamples);
 
     // Clamp the sample count at 32 to make sure we can keep the neighbor mask in an uint (cachedResult)
     numSpatialSamples = min(numSpatialSamples, 32);
@@ -181,13 +222,10 @@ RTXDI_DIReservoir RTXDI_DISpatialResampling(
     for (i = 0; i < numSpatialSamples; ++i)
     {
         // Get screen-space location of neighbor
-        uint sampleIdx = (startIdx + i) & rParams.neighborOffsetMask;
-        int2 spatialOffset = int2(float2(RTXDI_NEIGHBOR_OFFSETS_BUFFER[sampleIdx].xy) * sparams.samplingRadius);
-        int2 idx = int2(pixelPosition) + spatialOffset;
-
-        idx = RAB_ClampSamplePositionIntoView(idx, false);
-
-        RTXDI_ActivateCheckerboardPixel(idx, false, rParams.activeCheckerboardField);
+        int2 spatialOffset = int2(0, 0);
+        int2 idx = RTXDI_CalculateDISpatialNeighborIndex(
+            pixelPosition, neighborSequence, i, numSpatialSamples, rParams,
+            sParams.neighborOffsetSamplingMode, sParams.samplingRadius, spatialOffset);
 
         RAB_Surface neighborSurface = RAB_GetGBufferSurface(idx, false);
 
@@ -196,10 +234,10 @@ RTXDI_DIReservoir RTXDI_DISpatialResampling(
 
         if (!RTXDI_IsValidNeighbor(RAB_GetSurfaceNormal(centerSurface), RAB_GetSurfaceNormal(neighborSurface), 
             RAB_GetSurfaceLinearDepth(centerSurface), RAB_GetSurfaceLinearDepth(neighborSurface), 
-            sparams.normalThreshold, sparams.depthThreshold))
+            sParams.normalThreshold, sParams.depthThreshold))
             continue;
 
-        if (sparams.enableMaterialSimilarityTest && !RAB_AreMaterialsSimilar(RAB_GetMaterial(centerSurface), RAB_GetMaterial(neighborSurface)))
+        if (sParams.enableMaterialSimilarityTest && !RAB_AreMaterialsSimilar(RAB_GetMaterial(centerSurface), RAB_GetMaterial(neighborSurface)))
             continue;
 
         uint2 neighborReservoirPos = RTXDI_PixelPosToReservoirPos(idx, rParams.activeCheckerboardField);
@@ -217,7 +255,7 @@ RTXDI_DIReservoir RTXDI_DISpatialResampling(
         RAB_LightSample candidateLightSample = RAB_EmptyLightSample();
         if (RTXDI_IsValidDIReservoir(neighborSample))
         {   
-            if (sparams.discountNaiveSamples && neighborSample.M <= RTXDI_NAIVE_SAMPLING_M_THRESHOLD)
+            if (sParams.discountNaiveSamples && neighborSample.M <= RTXDI_NAIVE_SAMPLING_M_THRESHOLD)
                 continue;
 
             candidateLight = RAB_LoadLightInfo(RTXDI_GetDIReservoirLightIndex(neighborSample), false);
@@ -239,7 +277,7 @@ RTXDI_DIReservoir RTXDI_DISpatialResampling(
     if (RTXDI_IsValidDIReservoir(state))
     {
 #if RTXDI_ALLOWED_BIAS_CORRECTION >= RTXDI_BIAS_CORRECTION_BASIC
-        if (sparams.biasCorrectionMode >= RTXDI_BIAS_CORRECTION_BASIC)
+        if (sParams.biasCorrectionMode >= RTXDI_BIAS_CORRECTION_BASIC)
         {
             // Compute the unbiased normalization term (instead of using 1/M)
             float pi = state.targetPdf;
@@ -251,14 +289,10 @@ RTXDI_DIReservoir RTXDI_DISpatialResampling(
                 // If we skipped this neighbor above, do so again.
                 if ((cachedResult & (1u << uint(i))) == 0) continue;
 
-                uint sampleIdx = (startIdx + i) & rParams.neighborOffsetMask;
-
                 // Get the screen-space location of our neighbor
-                int2 idx = int2(pixelPosition) + int2(float2(RTXDI_NEIGHBOR_OFFSETS_BUFFER[sampleIdx].xy) * sparams.samplingRadius);
-
-                idx = RAB_ClampSamplePositionIntoView(idx, false);
-
-                RTXDI_ActivateCheckerboardPixel(idx, false, rParams.activeCheckerboardField);
+                int2 idx = RTXDI_CalculateDISpatialNeighborIndex(
+                    pixelPosition, neighborSequence, i, numSpatialSamples, rParams,
+                    sParams.neighborOffsetSamplingMode, sParams.samplingRadius);
 
                 // Load our neighbor's G-buffer
                 RAB_Surface neighborSurface = RAB_GetGBufferSurface(idx, false);
@@ -270,7 +304,7 @@ RTXDI_DIReservoir RTXDI_DISpatialResampling(
                 float ps = RAB_GetLightSampleTargetPdfForSurface(selectedSampleAtNeighbor, neighborSurface);
 
 #if RTXDI_ALLOWED_BIAS_CORRECTION >= RTXDI_BIAS_CORRECTION_RAY_TRACED
-                if (sparams.biasCorrectionMode == RTXDI_BIAS_CORRECTION_RAY_TRACED && ps > 0)
+                if (sParams.biasCorrectionMode == RTXDI_BIAS_CORRECTION_RAY_TRACED && ps > 0)
                 {
                     if (!RAB_GetConservativeVisibility(neighborSurface, selectedSampleAtNeighbor))
                     {

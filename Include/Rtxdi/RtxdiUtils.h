@@ -14,7 +14,7 @@
 
 #include <stdint.h>
 
-#include <Rtxdi/RtxdiParameters.h>
+#include <Rtxdi/DI/ReSTIRDIParameters.h>
 
 namespace rtxdi
 {
@@ -35,7 +35,16 @@ RTXDI_ReservoirBufferParameters CalculateReservoirBufferParameters(uint32_t rend
 
 void ComputePdfTextureSize(uint32_t maxItems, uint32_t& outWidth, uint32_t& outHeight, uint32_t& outMipLevels);
 
+// Fills neighborOffsetCount with packed RG8_SNORM offsets using the legacy low-discrepancy layout.
+// The count must be a power of two.
 void FillNeighborOffsetBuffer(uint8_t* buffer, uint32_t neighborOffsetCount);
+
+// StratifiedLowDiscrepancy additionally requires at least four entries and stores groups
+// of four offsets, one per quadrant, for use with the matching ReSTIR DI spatial sampling mode.
+void FillNeighborOffsetBuffer(
+    uint8_t* buffer,
+    uint32_t neighborOffsetCount,
+    ReSTIRDI_SpatialSamplingMode samplingMode);
 
 // 32 bit Jenkins hash
 uint32_t JenkinsHash(uint32_t a);

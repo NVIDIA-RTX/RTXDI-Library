@@ -60,6 +60,7 @@ RTXDI_DITemporalResamplingParameters GetDefaultReSTIRDITemporalResamplingParams(
     params.enableVisibilityShortcut = false;
     params.enablePermutationSampling = true;
     params.uniformRandomNumber = 0;
+    params.enableFallbackSampling = true;
     return params;
 }
 
@@ -75,34 +76,15 @@ RTXDI_DISpatialResamplingParameters GetDefaultReSTIRDISpatialResamplingParams()
 {
     RTXDI_DISpatialResamplingParameters params = {};
     params.numDisocclusionBoostSamples = 8;
-    params.numSamples = 1;
+    params.numSamples = 2;
     params.biasCorrectionMode = ReSTIRDI_SpatialBiasCorrectionMode::Basic;
     params.depthThreshold = 0.1f;
     params.normalThreshold = 0.5f;
     params.samplingRadius = 32.0f;
     params.enableMaterialSimilarityTest = true;
-    params.discountNaiveSamples = true;
+    params.discountNaiveSamples = false;
     params.targetHistoryLength = 0;
-    return params;
-}
-
-RTXDI_DISpatioTemporalResamplingParameters GetDefaultReSTIRDISpatioTemporalResamplingParams()
-{
-    RTXDI_DISpatioTemporalResamplingParameters params;
-    params.depthThreshold = 0.1f;
-    params.normalThreshold = 0.5f;
-    params.biasCorrectionMode = ReSTIRDI_SpatioTemporalBiasCorrectionMode::Basic;
-    params.maxHistoryLength = 20;
-
-    params.enablePermutationSampling = true;
-    params.uniformRandomNumber = 0;
-    params.enableVisibilityShortcut = false;
-    params.numSamples = 1;
-
-    params.numDisocclusionBoostSamples = 8;
-    params.samplingRadius = 32.0f;
-    params.enableMaterialSimilarityTest = true;
-    params.discountNaiveSamples = true;
+    params.neighborOffsetSamplingMode = ReSTIRDI_SpatialSamplingMode::StratifiedLowDiscrepancy;
     return params;
 }
 
@@ -121,6 +103,16 @@ void debugCheckParameters(const ReSTIRDIStaticParameters& params)
 {
     assert(params.RenderWidth > 0);
     assert(params.RenderHeight > 0);
+    assert(params.NeighborOffsetCount > 0);
+    assert((params.NeighborOffsetCount & (params.NeighborOffsetCount - 1)) == 0);
+}
+
+void debugCheckParameters(const RTXDI_DISpatialResamplingParameters& params, uint32_t neighborOffsetCount)
+{
+    if (params.neighborOffsetSamplingMode == ReSTIRDI_SpatialSamplingMode::StratifiedLowDiscrepancy)
+    {
+        assert(neighborOffsetCount >= 4);
+    }
 }
 
 ReSTIRDIContext::ReSTIRDIContext(const ReSTIRDIStaticParameters& params) :
@@ -134,7 +126,6 @@ ReSTIRDIContext::ReSTIRDIContext(const ReSTIRDIStaticParameters& params) :
     m_temporalResamplingParams(GetDefaultReSTIRDITemporalResamplingParams()),
     m_boilingFilterParams(GetDefaultReSTIRDIBoilingFilterParams()),
     m_spatialResamplingParams(GetDefaultReSTIRDISpatialResamplingParams()),
-    m_spatioTemporalResamplingParams(GetDefaultReSTIRDISpatioTemporalResamplingParams()),
     m_shadingParams(GetDefaultReSTIRDIShadingParams())
 {
     debugCheckParameters(params);
@@ -181,11 +172,6 @@ RTXDI_BoilingFilterParameters ReSTIRDIContext::GetBoilingFilterParameters() cons
 RTXDI_DISpatialResamplingParameters ReSTIRDIContext::GetSpatialResamplingParameters() const
 {
     return m_spatialResamplingParams;
-}
-
-RTXDI_DISpatioTemporalResamplingParameters ReSTIRDIContext::GetSpatioTemporalResamplingParameters() const
-{
-    return m_spatioTemporalResamplingParams;
 }
 
 RTXDI_ShadingParameters ReSTIRDIContext::GetShadingParameters() const
@@ -236,13 +222,8 @@ void ReSTIRDIContext::SetBoilingFilterParameters(const RTXDI_BoilingFilterParame
 
 void ReSTIRDIContext::SetSpatialResamplingParameters(const RTXDI_DISpatialResamplingParameters& spatialResamplingParams)
 {
+    debugCheckParameters(spatialResamplingParams, m_staticParams.NeighborOffsetCount);
     m_spatialResamplingParams = spatialResamplingParams;
-}
-
-void ReSTIRDIContext::SetSpatioTemporalResamplingParameters(const RTXDI_DISpatioTemporalResamplingParameters& spatioTemporalResamplingParams)
-{
-    m_spatioTemporalResamplingParams = spatioTemporalResamplingParams;
-    m_spatioTemporalResamplingParams.uniformRandomNumber = JenkinsHash(m_runtimeParams.frameIndex);
 }
 
 void ReSTIRDIContext::SetShadingParameters(const RTXDI_ShadingParameters& shadingParams)
@@ -254,34 +235,22 @@ void ReSTIRDIContext::UpdateBufferIndices()
 {
     const bool useTemporalResampling =
         m_resamplingMode == ReSTIRDI_ResamplingMode::Temporal ||
-        m_resamplingMode == ReSTIRDI_ResamplingMode::TemporalAndSpatial ||
-        m_resamplingMode == ReSTIRDI_ResamplingMode::FusedSpatiotemporal;
+        m_resamplingMode == ReSTIRDI_ResamplingMode::TemporalAndSpatial;
 
     const bool useSpatialResampling =
         m_resamplingMode == ReSTIRDI_ResamplingMode::Spatial ||
-        m_resamplingMode == ReSTIRDI_ResamplingMode::TemporalAndSpatial ||
-        m_resamplingMode == ReSTIRDI_ResamplingMode::FusedSpatiotemporal;
+        m_resamplingMode == ReSTIRDI_ResamplingMode::TemporalAndSpatial;
 
-
-    if (m_resamplingMode == ReSTIRDI_ResamplingMode::FusedSpatiotemporal)
-    {
-        m_bufferIndices.initialSamplingOutputBufferIndex = (m_lastFrameOutputReservoir + 1) % c_NumReSTIRDIReservoirBuffers;
-        m_bufferIndices.temporalResamplingInputBufferIndex = m_lastFrameOutputReservoir;
-        m_bufferIndices.shadingInputBufferIndex = m_bufferIndices.initialSamplingOutputBufferIndex;
-    }
-    else
-    {
-        m_bufferIndices.initialSamplingOutputBufferIndex = (m_lastFrameOutputReservoir + 1) % c_NumReSTIRDIReservoirBuffers;
-        m_bufferIndices.temporalResamplingInputBufferIndex = m_lastFrameOutputReservoir;
-        m_bufferIndices.temporalResamplingOutputBufferIndex = (m_bufferIndices.temporalResamplingInputBufferIndex + 1) % c_NumReSTIRDIReservoirBuffers;
-        m_bufferIndices.spatialResamplingInputBufferIndex = useTemporalResampling
-            ? m_bufferIndices.temporalResamplingOutputBufferIndex
-            : m_bufferIndices.initialSamplingOutputBufferIndex;
-        m_bufferIndices.spatialResamplingOutputBufferIndex = (m_bufferIndices.spatialResamplingInputBufferIndex + 1) % c_NumReSTIRDIReservoirBuffers;
-        m_bufferIndices.shadingInputBufferIndex = useSpatialResampling
-            ? m_bufferIndices.spatialResamplingOutputBufferIndex
-            : m_bufferIndices.temporalResamplingOutputBufferIndex;
-    }
+    m_bufferIndices.initialSamplingOutputBufferIndex = (m_lastFrameOutputReservoir + 1) % c_NumReSTIRDIReservoirBuffers;
+    m_bufferIndices.temporalResamplingInputBufferIndex = m_lastFrameOutputReservoir;
+    m_bufferIndices.temporalResamplingOutputBufferIndex = (m_bufferIndices.temporalResamplingInputBufferIndex + 1) % c_NumReSTIRDIReservoirBuffers;
+    m_bufferIndices.spatialResamplingInputBufferIndex = useTemporalResampling
+        ? m_bufferIndices.temporalResamplingOutputBufferIndex
+        : m_bufferIndices.initialSamplingOutputBufferIndex;
+    m_bufferIndices.spatialResamplingOutputBufferIndex = (m_bufferIndices.spatialResamplingInputBufferIndex + 1) % c_NumReSTIRDIReservoirBuffers;
+    m_bufferIndices.shadingInputBufferIndex = useSpatialResampling
+        ? m_bufferIndices.spatialResamplingOutputBufferIndex
+        : m_bufferIndices.temporalResamplingOutputBufferIndex;
     m_currentFrameOutputReservoir = m_bufferIndices.shadingInputBufferIndex;
 }
 

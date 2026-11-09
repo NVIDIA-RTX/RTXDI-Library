@@ -39,18 +39,17 @@ enum class ReSTIRDI_SpatialBiasCorrectionMode : uint32_t
     Raytraced = RTXDI_BIAS_CORRECTION_RAY_TRACED
 };
 
-enum class ReSTIRDI_SpatioTemporalBiasCorrectionMode : uint32_t
+enum class ReSTIRDI_SpatialSamplingMode : uint32_t
 {
-    Off = RTXDI_BIAS_CORRECTION_OFF,
-    Basic = RTXDI_BIAS_CORRECTION_BASIC,
-    Pairwise = RTXDI_BIAS_CORRECTION_PAIRWISE,
-    Raytraced = RTXDI_BIAS_CORRECTION_RAY_TRACED
+    LowDiscrepancy = RTXDI_DI_NEIGHBOR_OFFSET_SAMPLING_MODE_LOW_DISCREPANCY,
+    StratifiedLowDiscrepancy = RTXDI_DI_NEIGHBOR_OFFSET_SAMPLING_MODE_STRATIFIED_LOW_DISCREPANCY
 };
+
 #else
 #define ReSTIRDI_LocalLightSamplingMode uint32_t
 #define ReSTIRDI_TemporalBiasCorrectionMode uint32_t
 #define ReSTIRDI_SpatialBiasCorrectionMode uint32_t
-#define ReSTIRDI_SpatioTemporalBiasCorrectionMode uint32_t
+#define ReSTIRDI_SpatialSamplingMode uint32_t
 #endif
 
 struct RTXDI_DIBufferIndices
@@ -108,7 +107,7 @@ struct RTXDI_DITemporalResamplingParameters
 
     // Allows the temporal resampling logic to skip the bias correction ray trace for light samples
     // reused from the previous frame. Only safe to use when invisible light samples are discarded
-    // on the previous frame, then any sample coming from the previous frame can be assumed visible.
+    // on the previous frame. Requires age == 0 and spatialDistance == 0 in the resampled reservoir.
     uint32_t enableVisibilityShortcut;
 
     // Enables permuting the pixels sampled from the previous frame in order to add temporal
@@ -119,6 +118,14 @@ struct RTXDI_DITemporalResamplingParameters
     uint32_t uniformRandomNumber;
 
     float permutationSamplingThreshold; // Not used in TemporalResampling.hlsli
+
+    // If temporal surface matching fails, try one zero-motion sample with permutation sampling.
+    // The fallback requires a valid previous surface but skips depth and normal similarity tests.
+    // Useful for improving sampling quality in freshly disoccluded regions
+    uint32_t enableFallbackSampling;
+    uint32_t pad1;
+    uint32_t pad2;
+    uint32_t pad3;
 };
 
 struct RTXDI_DISpatialResamplingParameters
@@ -158,42 +165,11 @@ struct RTXDI_DISpatialResamplingParameters
     // Prevents samples which are from the current frame or have no reasonable temporal history merged being spread to neighbors
     uint32_t discountNaiveSamples;
 
-    uint32_t pad1;
+    // RTXDI_DI_NEIGHBOR_OFFSET_SAMPLING_MODE_*. Must match the bound DI neighbor offset table.
+    // Stratified sampling requires even sample counts.
+    ReSTIRDI_SpatialSamplingMode neighborOffsetSamplingMode;
     uint32_t pad2;
     uint32_t pad3;
-};
-
-struct RTXDI_DISpatioTemporalResamplingParameters
-{
-    // Common parameters, see RTXDI_DITemporal* or RTXDI_DISpatialResamplingParameters
-
-    float depthThreshold;
-
-    float normalThreshold;
-
-    ReSTIRDI_SpatioTemporalBiasCorrectionMode biasCorrectionMode;
-
-    uint32_t maxHistoryLength;
-
-    // Temporal parameters, see RTXDI_DITemporalResamplingParameters
-
-    uint32_t enablePermutationSampling;
-
-    uint32_t uniformRandomNumber;
-
-    uint32_t enableVisibilityShortcut;
-
-    // Spatial parameters, see RTXDI_DISpatialResamplingParameters
-
-    uint32_t numSamples;
-
-    uint32_t numDisocclusionBoostSamples;
-
-    float samplingRadius;
-
-    uint32_t enableMaterialSimilarityTest;
-
-    uint32_t discountNaiveSamples;
 };
 
 struct RTXDI_ShadingParameters
@@ -217,7 +193,6 @@ struct RTXDI_Parameters
     RTXDI_DITemporalResamplingParameters temporalResamplingParams;
     RTXDI_BoilingFilterParameters boilingFilterParams;
     RTXDI_DISpatialResamplingParameters spatialResamplingParams;
-    RTXDI_DISpatioTemporalResamplingParameters spatioTemporalResamplingParams;
     RTXDI_ShadingParameters shadingParams;
 };
 

@@ -12,7 +12,6 @@ set(sources
 	"Include/Rtxdi/DI/ReSTIRDI.h"
 	"Include/Rtxdi/DI/ReSTIRDIParameters.h"
 	"Include/Rtxdi/DI/SpatialResampling.hlsli"
-	"Include/Rtxdi/DI/SpatioTemporalResampling.hlsli"
 	"Include/Rtxdi/DI/TemporalResampling.hlsli"
 	"Include/Rtxdi/GI/BoilingFilter.hlsli"
 	"Include/Rtxdi/GI/Reservoir.hlsli"
@@ -57,6 +56,7 @@ set(sources
 	"Include/Rtxdi/Utils/RandomSamplerState.hlsli"
 	"Include/Rtxdi/Utils/ReservoirAddressing.hlsli"
 	"Include/Rtxdi/Utils/SampledLightData.hlsli"
+	"Include/Rtxdi/Utils/SpatialNeighborSampling.hlsli"
 	"Include/Rtxdi/Utils/TypePacking.hlsli"
 	"Source/ImportanceSamplingContext.cpp"
 	"Source/ReGIR.cpp"
@@ -75,6 +75,3 @@ endforeach()
 
 add_library(Rtxdi STATIC EXCLUDE_FROM_ALL ${sources})
 target_include_directories(Rtxdi PUBLIC "Include")
-
-# Dependencies for the resampling compile tests
-file(GLOB shader_dependencies "${CMAKE_CURRENT_SOURCE_DIR}/Include/Rtxdi/*")
